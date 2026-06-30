@@ -358,8 +358,68 @@ class GoogleRuntime:
         return _coerce_json_object(text)
 
 
-class CodexRuntime(OpenAIRuntime):
-    """Best-effort runtime for Codex clients that expose OpenAI-compatible chat APIs."""
+class CodexRuntime:
+    """Runtime for the openai-codex SDK thread/turn API.
+
+    The Codex SDK does not expose OpenAI-style ``chat.completions``. It uses a
+    thread/turn API instead, so we collect each turn's final response and expose
+    it through the same provider-neutral runtime interface.
+    """
+
+    async def stream_text(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+    ) -> AsyncIterator[ProviderTextChunk]:
+        prompt = _codex_prompt(messages)
+        client = binding.client
+        try:
+            thread = await client.thread_start(
+                model=binding.model,
+                cwd=None,
+                ephemeral=True,
+                service_name="cosmic-agent",
+            )
+            result = await thread.run(prompt, model=binding.model)
+            if result.final_response:
+                yield ProviderTextChunk(text=result.final_response)
+            usage = _codex_usage_chunk(result)
+            if usage is not None:
+                yield usage
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                await _maybe_await(close())
+
+    async def generate_json(
+        self,
+        binding: LLMClientBinding,
+        prompt: str,
+        schema: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        client = binding.client
+        try:
+            thread = await client.thread_start(
+                model=binding.model,
+                cwd=None,
+                ephemeral=True,
+                service_name="cosmic-agent",
+            )
+            result = await thread.run(
+                (
+                    "Return only one valid JSON object matching the provided schema. "
+                    "Do not include markdown fences or prose.\n\n"
+                    f"JSON schema:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+                    f"Source text:\n{prompt}"
+                ),
+                model=binding.model,
+                output_schema=dict(schema),
+            )
+            return _coerce_json_object(result.final_response)
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                await _maybe_await(close())
 
 
 def builtin_provider_runtimes() -> dict[str, ProviderRuntime]:
@@ -371,7 +431,45 @@ def builtin_provider_runtimes() -> dict[str, ProviderRuntime]:
         "anthropic": AnthropicRuntime(),
         "google": GoogleRuntime(),
         "codex": CodexRuntime(),
+	"nvidia": openai_runtime,
     }
+
+
+def _codex_prompt(messages: Sequence[ChatMessage]) -> str:
+    """Flatten neutral chat messages into the single-input format Codex accepts."""
+
+    parts: list[str] = []
+    for message in messages:
+        role = "Assistant" if message.role == "assistant" else "User"
+        if message.role == "system":
+            role = "System"
+        parts.append(f"{role}: {message.content}")
+    return "\n\n".join(parts)
+
+
+def _codex_usage_chunk(result: object) -> ProviderTextChunk | None:
+    usage = _get(result, "usage")
+    if usage is None:
+        return None
+    prompt_tokens = _int_or_none(
+        _get(usage, "input_tokens")
+        or _get(usage, "prompt_tokens")
+        or _get(usage, "total_input_tokens")
+    )
+    completion_tokens = _int_or_none(
+        _get(usage, "output_tokens")
+        or _get(usage, "completion_tokens")
+        or _get(usage, "total_output_tokens")
+    )
+    total_tokens = _int_or_none(_get(usage, "total_tokens"))
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+    return ProviderTextChunk(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        usage_source="codex_turn_usage",
+    )
 
 
 async def _maybe_await(value: Any) -> Any:
