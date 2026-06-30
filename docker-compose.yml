@@ -1,0 +1,43 @@
+name: cosmic-agent
+
+services:
+  api:
+    build:
+      context: .
+    image: cosmic-agent:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      XDG_DATA_HOME: /data
+      DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-openai}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4o-mini}
+      CGI_PARSE_PROVIDER: ${CGI_PARSE_PROVIDER:-openai}
+      CGI_PARSE_MODEL: ${CGI_PARSE_MODEL:-gpt-4o-mini}
+      CGI_PARSE_MAX_NODES: ${CGI_PARSE_MAX_NODES:-24}
+    ports:
+      - "${COSMIC_AGENT_PORT:-8000}:8000"
+    volumes:
+      - cosmic_agent_data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  cosmic_agent_data:
