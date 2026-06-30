@@ -6,6 +6,7 @@ from app.core import (
     CGIMemoryNodePatch,
     CGIMemoryWrite,
     SQLiteCGIMemoryStore,
+    cgi_memory_json_schema,
     parse_cgi_memory_document,
 )
 
@@ -26,6 +27,37 @@ def test_parse_cgi_document_trims_edges_to_kept_nodes() -> None:
 
     assert [node.label for node in document.nodes] == ["A", "B"]
     assert [(edge.source_label, edge.target_label) for edge in document.edges] == [("A", "B")]
+
+
+def test_cgi_memory_json_schema_is_strict_for_structured_output_providers() -> None:
+    schema = cgi_memory_json_schema()
+
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["edges", "metadata", "nodes"]
+    assert schema["$defs"]["CGINodeDraft"]["additionalProperties"] is False
+    assert schema["$defs"]["CGINodeDraft"]["required"] == [
+        "kind",
+        "label",
+        "metadata",
+        "summary",
+        "tags",
+        "weight",
+    ]
+    assert schema["$defs"]["CGIEdgeDraft"]["additionalProperties"] is False
+    assert schema["$defs"]["CGIEdgeDraft"]["required"] == [
+        "metadata",
+        "relation",
+        "source_label",
+        "target_label",
+        "weight",
+    ]
+    assert schema["properties"]["metadata"]["additionalProperties"] is False
+    assert (
+        schema["$defs"]["CGINodeDraft"]["properties"]["metadata"]["additionalProperties"] is False
+    )
+    assert (
+        schema["$defs"]["CGIEdgeDraft"]["properties"]["metadata"]["additionalProperties"] is False
+    )
 
 
 def test_sqlite_cgi_memory_store_persists_nodes(tmp_path: Path) -> None:

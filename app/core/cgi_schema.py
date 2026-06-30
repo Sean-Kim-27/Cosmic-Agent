@@ -111,4 +111,47 @@ def parse_cgi_memory_document(payload: Mapping[str, Any] | str) -> CGIMemoryDocu
 def cgi_memory_json_schema() -> dict[str, Any]:
     """Return the JSON schema requested from structured-output providers."""
 
-    return CGIMemoryDocument.model_json_schema()
+    return _strict_object_schema(CGIMemoryDocument.model_json_schema())
+
+
+def _strict_object_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a provider-safe schema for strict structured-output APIs.
+
+    OpenAI/Codex structured output validators reject object schemas unless every
+    object explicitly supplies ``additionalProperties: false``. Pydantic's
+    generated schema omits that flag for normal models and emits
+    ``additionalProperties: true`` for ``dict[str, Any]`` fields, so the CGI
+    parser schema needs a small provider-neutral normalization pass before it is
+    sent to any strict provider.
+    """
+
+    return _strict_schema_node(dict(schema))
+
+
+def _strict_schema_node(node: Any) -> Any:
+    if isinstance(node, list):
+        return [_strict_schema_node(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+
+    normalized: dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "additionalProperties":
+            continue
+        normalized[key] = _strict_schema_node(value)
+
+    is_object = (
+        normalized.get("type") == "object"
+        or "properties" in normalized
+        or "additionalProperties" in node
+    )
+    if is_object:
+        properties = normalized.get("properties")
+        if isinstance(properties, dict):
+            normalized["required"] = sorted(str(key) for key in properties)
+        else:
+            normalized["properties"] = {}
+            normalized["required"] = []
+        normalized["additionalProperties"] = False
+
+    return normalized
