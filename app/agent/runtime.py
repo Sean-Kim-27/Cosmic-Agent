@@ -212,11 +212,7 @@ class OpenAIRuntime:
         return _coerce_json_object(_extract_openai_chat_message(response))
     
 class NvidiaRuntime(OpenAIRuntime):
-    """Runtime for NVIDIA OpenAI-compatible Chat Completions.
-
-    NVIDIA endpoint can fail with stream=True, so this runtime uses
-    non-streaming chat completions and yields the final text as one chunk.
-    """
+    """Runtime for NVIDIA OpenAI-compatible Chat Completions."""
 
     async def stream_text(
         self,
@@ -232,6 +228,8 @@ class NvidiaRuntime(OpenAIRuntime):
                 stream=False,
             )
         )
+
+        print("NVIDIA RAW RESPONSE:", response)
 
         text = _extract_openai_chat_message(response)
         if text:
