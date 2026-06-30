@@ -51,6 +51,7 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     )
+    nvidia_api_key: SecretStr | None = None
 
     config_encryption_key: SecretStr | None = None
     config_db_path: Path = Field(default_factory=_default_config_db_path)

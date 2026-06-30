@@ -15,6 +15,7 @@ ApiKeySetting = Literal[
     "openai_api_key",
     "anthropic_api_key",
     "google_api_key",
+    "nvidia_api_key",
 ]
 
 _PROVIDER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -216,6 +217,12 @@ def _build_codex_client(api_key: str | None) -> object:
     del api_key
     return create_codex_client()
 
+def _build_nvidia_client(api_key: str | None) -> object:
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(api_key=api_key,
+                       base_url="https://integrate.api.nvidia.com/v1"
+                       )
+
 
 def builtin_provider_definitions() -> tuple[ProviderDefinition, ...]:
     """Return built-in registrations without embedding routing conditionals."""
@@ -239,5 +246,10 @@ def builtin_provider_definitions() -> tuple[ProviderDefinition, ...]:
         ProviderDefinition(
             name="codex",
             builder=_build_codex_client,
+        ),
+        ProviderDefinition(
+            name="nvidia",
+            builder=_build_nvidia_client,
+            api_key_setting="nvidia_api_key",
         ),
     )
