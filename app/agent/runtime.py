@@ -214,9 +214,8 @@ class OpenAIRuntime:
 class NvidiaRuntime(OpenAIRuntime):
     """Runtime for NVIDIA OpenAI-compatible Chat Completions.
 
-    NVIDIA's OpenAI-compatible endpoint can fail during streaming when
-    OpenAI-specific stream_options are sent, so streaming is implemented
-    without stream_options.
+    NVIDIA endpoint can fail with stream=True, so this runtime uses
+    non-streaming chat completions and yields the final text as one chunk.
     """
 
     async def stream_text(
@@ -226,17 +225,17 @@ class NvidiaRuntime(OpenAIRuntime):
     ) -> AsyncIterator[ProviderTextChunk]:
         chat = _chat_completions(binding.client)
 
-        stream = await _maybe_await(
+        response = await _maybe_await(
             chat.create(
                 model=binding.model,
                 messages=_openai_messages(messages),
-                stream=True,
+                stream=False,
             )
         )
 
-        async for event in stream:
-            for text in _extract_openai_chat_delta(event):
-                yield ProviderTextChunk(text=text)
+        text = _extract_openai_chat_message(response)
+        if text:
+            yield ProviderTextChunk(text=text)
 
 class AnthropicRuntime:
     """Runtime for Anthropic Messages clients."""
