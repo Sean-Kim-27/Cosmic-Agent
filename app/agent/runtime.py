@@ -210,7 +210,33 @@ class OpenAIRuntime:
             )
         )
         return _coerce_json_object(_extract_openai_chat_message(response))
+    
+class NvidiaRuntime(OpenAIRuntime):
+    """Runtime for NVIDIA OpenAI-compatible Chat Completions.
 
+    NVIDIA's OpenAI-compatible endpoint can fail during streaming when
+    OpenAI-specific stream_options are sent, so streaming is implemented
+    without stream_options.
+    """
+
+    async def stream_text(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+    ) -> AsyncIterator[ProviderTextChunk]:
+        chat = _chat_completions(binding.client)
+
+        stream = await _maybe_await(
+            chat.create(
+                model=binding.model,
+                messages=_openai_messages(messages),
+                stream=True,
+            )
+        )
+
+        async for event in stream:
+            for text in _extract_openai_chat_delta(event):
+                yield ProviderTextChunk(text=text)
 
 class AnthropicRuntime:
     """Runtime for Anthropic Messages clients."""
@@ -431,7 +457,7 @@ def builtin_provider_runtimes() -> dict[str, ProviderRuntime]:
         "anthropic": AnthropicRuntime(),
         "google": GoogleRuntime(),
         "codex": CodexRuntime(),
-	"nvidia": openai_runtime,
+	"nvidia": NvidiaRuntime(),
     }
 
 
