@@ -5,6 +5,7 @@
 CGI/
 my-agent/
 
+.git/
 .DS_Store
 **/.DS_Store
 
@@ -20,14 +21,11 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-uv.lock
-dashboard/node_modules/
-dashboard/dist/
-dashboard/*.tsbuildinfo
-dashboard/vite.config.js
-dashboard/vite.config.d.ts
 
 .venv/
 venv/
 
-.docker/
+dashboard/node_modules/
+dashboard/dist/
+
+README*.tmp

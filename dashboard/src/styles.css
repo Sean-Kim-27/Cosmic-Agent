@@ -1,0 +1,286 @@
+:root {
+  color: #e8ecff;
+  background: #070914;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  background: #7c5cff;
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.75rem 1.1rem;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button.secondary {
+  background: #242a42;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #303957;
+  border-radius: 14px;
+  background: #0e1324;
+  color: #f5f7ff;
+  padding: 0.8rem 0.9rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.app-shell {
+  margin: 0 auto;
+  max-width: 1440px;
+  padding: 2rem;
+}
+
+.hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.hero h1,
+.panel h2 {
+  margin: 0;
+}
+
+.hero-copy,
+.muted,
+.empty {
+  color: #9aa6c4;
+}
+
+.eyebrow {
+  color: #8ea0ff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+}
+
+.grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1.35fr) minmax(380px, 0.85fr);
+}
+
+.panel {
+  background: linear-gradient(145deg, rgba(20, 26, 48, 0.95), rgba(12, 16, 30, 0.95));
+  border: 1px solid rgba(116, 134, 203, 0.18);
+  border-radius: 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  min-height: 520px;
+  padding: 1.25rem;
+}
+
+.panel-header,
+.actions,
+.inline-fields,
+.job-card-top {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.status-pill {
+  background: #121a32;
+  border: 1px solid #2f3c68;
+  border-radius: 999px;
+  color: #cbd5ff;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.session-row {
+  align-items: center;
+  color: #8d9abe;
+  display: flex;
+  font-size: 0.82rem;
+  gap: 0.75rem;
+  justify-content: space-between;
+  margin-top: 0.7rem;
+}
+
+.messages,
+.job-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.messages {
+  max-height: 48vh;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.message,
+.job-card {
+  border: 1px solid rgba(116, 134, 203, 0.16);
+  border-radius: 18px;
+  padding: 0.9rem;
+}
+
+.message {
+  max-width: min(84%, 760px);
+}
+
+.message.user {
+  justify-self: end;
+  background: linear-gradient(145deg, #4936a8, #1f315f);
+  border-bottom-right-radius: 6px;
+}
+
+.message.assistant {
+  justify-self: start;
+  background: #101426;
+  border-bottom-left-radius: 6px;
+}
+
+.message strong {
+  color: #9db0ff;
+  display: block;
+  font-size: 0.78rem;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+
+.message p,
+.job-card p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.inline-fields label {
+  flex: 1;
+}
+
+.checkbox-row {
+  align-items: center;
+  color: #cbd5ff;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.job-list {
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.job-card {
+  background: #0d1222;
+}
+
+.job-card dl {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0.75rem 0 0;
+}
+
+.job-card dt {
+  color: #7f8ba9;
+  font-size: 0.72rem;
+}
+
+.job-card dd {
+  margin: 0;
+}
+
+.job-status {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.3rem 0.55rem;
+}
+
+.job-status.pending {
+  background: #163858;
+  color: #9ed7ff;
+}
+
+.job-status.processing {
+  background: #4d3b0e;
+  color: #ffd88a;
+}
+
+.job-status.completed {
+  background: #14391f;
+  color: #97f1ae;
+}
+
+.job-status.failed,
+.job-status.quota_locked {
+  background: #451b29;
+  color: #ff9eb9;
+}
+
+.error-text {
+  color: #ffb0c2;
+  font-size: 0.82rem;
+  margin-top: 0.75rem !important;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  .hero,
+  .grid,
+  .inline-fields {
+    display: block;
+  }
+
+  .panel {
+    margin-bottom: 1rem;
+  }
+
+  .inline-fields label {
+    display: block;
+    margin-bottom: 0.75rem;
+  }
+}

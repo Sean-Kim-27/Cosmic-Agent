@@ -194,6 +194,123 @@ class CGITreeResponse(BaseModel):
     interactions: list[CGIInteractionTreeResponse]
 
 
+class ChatHistoryMessageResponse(BaseModel):
+    """A persisted chat message for dashboard session restore."""
+
+    id: str
+    session_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    provider: str | None
+    model: str | None
+    created_at: str
+
+
+class ChatHistoryResponse(BaseModel):
+    """Session chat history plus the CGI graph context for that session."""
+
+    session_id: str
+    messages: list[ChatHistoryMessageResponse]
+    cgi_context: CGITreeResponse
+
+
+class CGIPruningEventResponse(BaseModel):
+    """A pruning event emitted by the CGI memory maintenance boundary."""
+
+    id: str
+    strategy: str
+    before_interactions: int
+    after_interactions: int
+    before_nodes: int
+    after_nodes: int
+    before_edges: int
+    after_edges: int
+    pruned_interactions: int
+    pruned_nodes: int
+    pruned_edges: int
+    created_at: str
+
+
+class CGIMemoryMaintenanceResponse(BaseModel):
+    """Immediate pruning result for stress verification."""
+
+    strategy: str
+    before_interactions: int
+    after_interactions: int
+    before_nodes: int
+    after_nodes: int
+    before_edges: int
+    after_edges: int
+    pruned_interactions: int
+    pruned_nodes: int
+    pruned_edges: int
+
+
+class UsageRecordResponse(BaseModel):
+    """One recent LLM usage record."""
+
+    id: str
+    provider: str
+    model: str
+    operation: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+    metadata: dict[str, Any]
+    created_at: str
+
+
+class UsageSummaryResponse(BaseModel):
+    """Dashboard summary for today's token usage."""
+
+    since: str
+    calls: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+    records: list[UsageRecordResponse] = Field(default_factory=list)
+
+
+class CGIParseJobResponse(BaseModel):
+    """One persisted background CGI parse job."""
+
+    id: str
+    session_id: str | None
+    user_message: str
+    assistant_answer: str
+    status: Literal["PENDING", "PROCESSING", "COMPLETED", "FAILED", "QUOTA_LOCKED"]
+    attempts: int
+    max_attempts: int
+    last_error_type: str | None
+    last_error_message: str | None
+    next_run_at: str | None
+    locked_at: str | None
+    completed_at: str | None
+    interaction_id: str | None
+    created_at: str
+    updated_at: str
+
+
+class JobRetryRequest(BaseModel):
+    """Retry stopped background jobs from dashboard controls."""
+
+    statuses: list[Literal["FAILED", "QUOTA_LOCKED"]] = Field(
+        default_factory=lambda: ["FAILED", "QUOTA_LOCKED"],
+        max_length=2,
+    )
+    process_limit: int = Field(default=3, ge=1, le=50)
+
+
+class JobRetryResponse(BaseModel):
+    """Retry-all result after stopped jobs were requeued."""
+
+    reset_count: int
+    statuses: list[str]
+    processing_scheduled: bool
+
+
 class CGINodePatchRequest(BaseModel):
     """Partial CGI node edit request."""
 

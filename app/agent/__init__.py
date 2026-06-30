@@ -9,6 +9,7 @@ from app.agent.llm_provider import (
     ProviderNotRegisteredError,
     ProviderStatus,
 )
+from app.agent.mcp_tooling import MCPToolCatalog, ProviderMCPTool, mcp_tools_to_provider_schema
 from app.agent.messages import (
     AgentChatRequest,
     AgentStreamCompleted,
@@ -20,6 +21,7 @@ from app.agent.runtime import (
     LLMRuntimeRegistry,
     ProviderResponseFormatError,
     ProviderRuntimeNotRegisteredError,
+    ProviderTextChunk,
 )
 from app.agent.service import CosmicAgentService
 
@@ -35,10 +37,14 @@ __all__ = [
     "LLMClientBinding",
     "LLMProviderFactory",
     "LLMRuntimeRegistry",
+    "MCPToolCatalog",
     "MissingProviderCredentialError",
+    "ProviderMCPTool",
     "ProviderResponseFormatError",
     "ProviderDefinition",
     "ProviderNotRegisteredError",
     "ProviderRuntimeNotRegisteredError",
     "ProviderStatus",
+    "ProviderTextChunk",
+    "mcp_tools_to_provider_schema",
 ]

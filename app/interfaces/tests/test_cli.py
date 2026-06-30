@@ -31,7 +31,7 @@ class FakeParser:
     def __init__(self) -> None:
         self.jobs: list[CGIParseJob] = []
 
-    async def parse_and_store_safely(self, job: CGIParseJob) -> None:
+    async def enqueue_and_process_safely(self, job: CGIParseJob) -> None:
         self.jobs.append(job)
 
 

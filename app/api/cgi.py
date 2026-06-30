@@ -10,8 +10,10 @@ from app.api.dependencies import get_cgi_memory_store
 from app.api.schemas import (
     CGIEdgeResponse,
     CGIInteractionTreeResponse,
+    CGIMemoryMaintenanceResponse,
     CGINodePatchRequest,
     CGINodeResponse,
+    CGIPruningEventResponse,
     CGITreeResponse,
 )
 from app.core import CGIMemoryNode, CGIMemoryNodePatch, SQLiteCGIMemoryStore
@@ -114,6 +116,61 @@ async def delete_cgi_node(
     deleted = await asyncio.to_thread(memory_store.delete_node, node_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CGI node not found")
+
+
+@router.post("/prune", response_model=CGIMemoryMaintenanceResponse)
+async def prune_cgi_memory(
+    max_interactions: int = Query(default=200, ge=1, le=10_000),
+    min_node_weight: float = Query(default=0.05, ge=0.0, le=1.0),
+    memory_store: SQLiteCGIMemoryStore = Depends(get_cgi_memory_store),
+) -> CGIMemoryMaintenanceResponse:
+    """Run escape_node_pruner immediately for stress-test and dashboard controls."""
+
+    result = await asyncio.to_thread(
+        memory_store.prune,
+        max_interactions=max_interactions,
+        min_node_weight=min_node_weight,
+        strategy="escape_node_pruner",
+    )
+    return CGIMemoryMaintenanceResponse(
+        strategy=result.strategy,
+        before_interactions=result.before_interactions,
+        after_interactions=result.after_interactions,
+        before_nodes=result.before_nodes,
+        after_nodes=result.after_nodes,
+        before_edges=result.before_edges,
+        after_edges=result.after_edges,
+        pruned_interactions=result.pruned_interactions,
+        pruned_nodes=result.pruned_nodes,
+        pruned_edges=result.pruned_edges,
+    )
+
+
+@router.get("/pruning-events", response_model=list[CGIPruningEventResponse])
+async def list_cgi_pruning_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    memory_store: SQLiteCGIMemoryStore = Depends(get_cgi_memory_store),
+) -> list[CGIPruningEventResponse]:
+    """Return recent CGI pruning/compaction events."""
+
+    events = await asyncio.to_thread(memory_store.list_pruning_events, limit=limit)
+    return [
+        CGIPruningEventResponse(
+            id=event.id,
+            strategy=event.strategy,
+            before_interactions=event.before_interactions,
+            after_interactions=event.after_interactions,
+            before_nodes=event.before_nodes,
+            after_nodes=event.after_nodes,
+            before_edges=event.before_edges,
+            after_edges=event.after_edges,
+            pruned_interactions=event.pruned_interactions,
+            pruned_nodes=event.pruned_nodes,
+            pruned_edges=event.pruned_edges,
+            created_at=event.created_at,
+        )
+        for event in events
+    ]
 
 
 def _node_response(node: CGIMemoryNode) -> CGINodeResponse:

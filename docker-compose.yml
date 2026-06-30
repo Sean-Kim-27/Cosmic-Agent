@@ -15,6 +15,8 @@ services:
       CGI_PARSE_PROVIDER: ${CGI_PARSE_PROVIDER:-openai}
       CGI_PARSE_MODEL: ${CGI_PARSE_MODEL:-gpt-4o-mini}
       CGI_PARSE_MAX_NODES: ${CGI_PARSE_MAX_NODES:-24}
+      FRONTEND_API_SECRET: ${FRONTEND_API_SECRET:-}
+      API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-20}
     ports:
       - "${COSMIC_AGENT_PORT:-8000}:8000"
     volumes:
@@ -33,6 +35,36 @@ services:
           "python",
           "-c",
           "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  dashboard:
+    build:
+      context: ./dashboard
+    image: cosmic-agent-dashboard:local
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8000
+      VITE_FRONTEND_API_SECRET: ${FRONTEND_API_SECRET:-}
+    ports:
+      - "${COSMIC_DASHBOARD_PORT:-5173}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5173', { signal: AbortSignal.timeout(3000) }).then(r => { if (!r.ok) process.exit(1) })",
         ]
       interval: 30s
       timeout: 5s

@@ -6,10 +6,13 @@ import inspect
 import json
 import re
 from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.agent.llm_provider import LLMClientBinding
+from app.agent.mcp_tooling import MCPToolCatalog
 from app.agent.messages import ChatMessage
+from app.core import MCPTool, MCPToolCall
 
 _PROVIDER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _DEFAULT_MAX_TEXT_TOKENS = 4_096
@@ -28,6 +31,17 @@ class ProviderResponseFormatError(LLMRuntimeError):
     """Raised when a provider response cannot be interpreted safely."""
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderTextChunk:
+    """One provider stream chunk, optionally carrying native usage metadata."""
+
+    text: str = ""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    usage_source: str | None = None
+
+
 class ProviderRuntime(Protocol):
     """Provider-specific text streaming and JSON generation."""
 
@@ -35,8 +49,8 @@ class ProviderRuntime(Protocol):
         self,
         binding: LLMClientBinding,
         messages: Sequence[ChatMessage],
-    ) -> AsyncIterator[str]:
-        """Yield text deltas for the selected model."""
+    ) -> AsyncIterator[ProviderTextChunk | str]:
+        """Yield text deltas and optional provider-native usage metadata."""
         ...
 
     async def generate_json(
@@ -67,11 +81,17 @@ class LLMRuntimeRegistry:
         self,
         binding: LLMClientBinding,
         messages: Sequence[ChatMessage],
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[ProviderTextChunk]:
         runtime = self._get(binding.provider)
         async for chunk in runtime.stream_text(binding, messages):
-            if chunk:
-                yield chunk
+            normalized = _coerce_stream_chunk(chunk)
+            if (
+                normalized.text
+                or normalized.prompt_tokens is not None
+                or normalized.completion_tokens is not None
+                or normalized.total_tokens is not None
+            ):
+                yield normalized
 
     async def generate_json(
         self,
@@ -80,6 +100,24 @@ class LLMRuntimeRegistry:
         schema: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         return await self._get(binding.provider).generate_json(binding, prompt, schema)
+
+    async def select_tool_calls(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[MCPTool],
+    ) -> tuple[MCPToolCall, ...]:
+        if not tools:
+            return ()
+        runtime = self._get(binding.provider)
+        selector = getattr(runtime, "select_tool_calls", None)
+        if selector is None:
+            return ()
+        catalog = MCPToolCatalog.from_tools(tuple(tools))
+        selected = await _maybe_await(selector(binding, messages, catalog))
+        if selected is None:
+            return ()
+        return tuple(call for call in selected if isinstance(call, MCPToolCall))
 
     def _get(self, provider: str) -> ProviderRuntime:
         normalized = self._normalize_provider(provider)
@@ -105,18 +143,42 @@ class OpenAIRuntime:
         self,
         binding: LLMClientBinding,
         messages: Sequence[ChatMessage],
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[ProviderTextChunk]:
         chat = _chat_completions(binding.client)
-        stream = await _maybe_await(
+        kwargs = {
+            "model": binding.model,
+            "messages": _openai_messages(messages),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        try:
+            stream = await _maybe_await(chat.create(**kwargs))
+        except TypeError:
+            kwargs.pop("stream_options")
+            stream = await _maybe_await(chat.create(**kwargs))
+        async for event in stream:
+            usage = _extract_openai_usage(event)
+            for text in _extract_openai_chat_delta(event):
+                yield ProviderTextChunk(text=text)
+            if usage is not None:
+                yield usage
+
+    async def select_tool_calls(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+        catalog: MCPToolCatalog,
+    ) -> tuple[MCPToolCall, ...]:
+        chat = _chat_completions(binding.client)
+        response = await _maybe_await(
             chat.create(
                 model=binding.model,
                 messages=_openai_messages(messages),
-                stream=True,
+                tools=catalog.openai_tools(),
+                tool_choice="auto",
             )
         )
-        async for event in stream:
-            for text in _extract_openai_chat_delta(event):
-                yield text
+        return _extract_openai_tool_calls(response, catalog)
 
     async def generate_json(
         self,
@@ -157,7 +219,7 @@ class AnthropicRuntime:
         self,
         binding: LLMClientBinding,
         messages: Sequence[ChatMessage],
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[ProviderTextChunk]:
         system, anthropic_messages = _anthropic_messages(messages)
         kwargs: dict[str, Any] = {
             "model": binding.model,
@@ -171,7 +233,29 @@ class AnthropicRuntime:
         async for event in stream:
             text = _extract_anthropic_text_delta(event)
             if text:
-                yield text
+                yield ProviderTextChunk(text=text)
+            usage = _extract_anthropic_usage(event)
+            if usage is not None:
+                yield usage
+
+    async def select_tool_calls(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+        catalog: MCPToolCatalog,
+    ) -> tuple[MCPToolCall, ...]:
+        system, anthropic_messages = _anthropic_messages(messages)
+        kwargs: dict[str, Any] = {
+            "model": binding.model,
+            "max_tokens": 1_024,
+            "messages": anthropic_messages,
+            "tools": catalog.anthropic_tools(),
+            "tool_choice": {"type": "auto"},
+        }
+        if system:
+            kwargs["system"] = system
+        response = await _maybe_await(binding.client.messages.create(**kwargs))
+        return _extract_anthropic_tool_calls(response, catalog)
 
     async def generate_json(
         self,
@@ -211,7 +295,7 @@ class GoogleRuntime:
         self,
         binding: LLMClientBinding,
         messages: Sequence[ChatMessage],
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[ProviderTextChunk]:
         system, contents = _google_contents(messages)
         stream = await _maybe_await(
             binding.client.models.generate_content_stream(
@@ -223,7 +307,29 @@ class GoogleRuntime:
         async for event in stream:
             text = _get(event, "text")
             if isinstance(text, str) and text:
-                yield text
+                yield ProviderTextChunk(text=text)
+            usage = _extract_google_usage(event)
+            if usage is not None:
+                yield usage
+
+    async def select_tool_calls(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+        catalog: MCPToolCatalog,
+    ) -> tuple[MCPToolCall, ...]:
+        system, contents = _google_contents(messages)
+        response = await _maybe_await(
+            binding.client.models.generate_content(
+                model=binding.model,
+                contents=contents,
+                config=_google_config(
+                    system_instruction=system,
+                    tools=[{"function_declarations": catalog.google_tools()}],
+                ),
+            )
+        )
+        return _extract_google_tool_calls(response, catalog)
 
     async def generate_json(
         self,
@@ -280,6 +386,12 @@ def _get(value: object, key: str) -> Any:
     return getattr(value, key, None)
 
 
+def _coerce_stream_chunk(value: ProviderTextChunk | str) -> ProviderTextChunk:
+    if isinstance(value, ProviderTextChunk):
+        return value
+    return ProviderTextChunk(text=value)
+
+
 def _chat_completions(client: object) -> object:
     chat = _get(client, "chat")
     completions = _get(chat, "completions") if chat is not None else None
@@ -302,6 +414,18 @@ def _extract_openai_chat_delta(event: object) -> list[str]:
     return texts
 
 
+def _extract_openai_usage(event: object) -> ProviderTextChunk | None:
+    usage = _get(event, "usage")
+    if usage is None:
+        return None
+    return ProviderTextChunk(
+        prompt_tokens=_int_or_none(_get(usage, "prompt_tokens")),
+        completion_tokens=_int_or_none(_get(usage, "completion_tokens")),
+        total_tokens=_int_or_none(_get(usage, "total_tokens")),
+        usage_source="openai_stream_usage",
+    )
+
+
 def _extract_openai_chat_message(response: object) -> str:
     choices = _get(response, "choices") or []
     if not choices:
@@ -312,6 +436,27 @@ def _extract_openai_chat_message(response: object) -> str:
     if not parts:
         raise ProviderResponseFormatError("OpenAI JSON response did not include content")
     return "".join(parts)
+
+
+def _extract_openai_tool_calls(
+    response: object,
+    catalog: MCPToolCatalog,
+) -> tuple[MCPToolCall, ...]:
+    choices = _get(response, "choices") or []
+    if not choices:
+        return ()
+    message = _get(choices[0], "message")
+    calls: list[MCPToolCall] = []
+    for tool_call in _get(message, "tool_calls") or []:
+        function = _get(tool_call, "function")
+        name = _get(function, "name")
+        if not isinstance(name, str):
+            continue
+        arguments = _json_object_arguments(_get(function, "arguments"))
+        call = catalog.to_mcp_call(name, arguments)
+        if call is not None:
+            calls.append(call)
+    return tuple(calls)
 
 
 def _anthropic_messages(messages: Sequence[ChatMessage]) -> tuple[str, list[dict[str, str]]]:
@@ -334,11 +479,48 @@ def _extract_anthropic_text_delta(event: object) -> str | None:
     return text if isinstance(text, str) else None
 
 
+def _extract_anthropic_usage(event: object) -> ProviderTextChunk | None:
+    usage = _get(event, "usage")
+    if usage is None:
+        message = _get(event, "message")
+        usage = _get(message, "usage") if message is not None else None
+    if usage is None:
+        return None
+    input_tokens = _int_or_none(_get(usage, "input_tokens"))
+    output_tokens = _int_or_none(_get(usage, "output_tokens"))
+    total_tokens = None
+    if input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
+    return ProviderTextChunk(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=total_tokens,
+        usage_source="anthropic_stream_usage",
+    )
+
+
 def _extract_anthropic_tool_input(response: object) -> object | None:
     for block in _get(response, "content") or []:
         if _get(block, "type") == "tool_use":
             return _get(block, "input")
     return None
+
+
+def _extract_anthropic_tool_calls(
+    response: object,
+    catalog: MCPToolCatalog,
+) -> tuple[MCPToolCall, ...]:
+    calls: list[MCPToolCall] = []
+    for block in _get(response, "content") or []:
+        if _get(block, "type") != "tool_use":
+            continue
+        name = _get(block, "name")
+        if not isinstance(name, str):
+            continue
+        call = catalog.to_mcp_call(name, _json_object_arguments(_get(block, "input")))
+        if call is not None:
+            calls.append(call)
+    return tuple(calls)
 
 
 def _extract_anthropic_message_text(response: object) -> str:
@@ -371,6 +553,44 @@ def _google_config(**kwargs: object) -> object:
     )
 
 
+def _extract_google_usage(event: object) -> ProviderTextChunk | None:
+    usage = _get(event, "usage_metadata")
+    if usage is None:
+        return None
+    return ProviderTextChunk(
+        prompt_tokens=_int_or_none(_get(usage, "prompt_token_count")),
+        completion_tokens=_int_or_none(_get(usage, "candidates_token_count")),
+        total_tokens=_int_or_none(_get(usage, "total_token_count")),
+        usage_source="google_stream_usage_metadata",
+    )
+
+
+def _extract_google_tool_calls(
+    response: object,
+    catalog: MCPToolCatalog,
+) -> tuple[MCPToolCall, ...]:
+    raw_calls: list[object] = []
+    function_calls = _get(response, "function_calls")
+    if isinstance(function_calls, Sequence) and not isinstance(function_calls, (str, bytes)):
+        raw_calls.extend(function_calls)
+    for candidate in _get(response, "candidates") or []:
+        content = _get(candidate, "content")
+        for part in _get(content, "parts") or []:
+            function_call = _get(part, "function_call")
+            if function_call is not None:
+                raw_calls.append(function_call)
+
+    calls: list[MCPToolCall] = []
+    for raw_call in raw_calls:
+        name = _get(raw_call, "name")
+        if not isinstance(name, str):
+            continue
+        call = catalog.to_mcp_call(name, _json_object_arguments(_get(raw_call, "args")))
+        if call is not None:
+            calls.append(call)
+    return tuple(calls)
+
+
 def _text_parts(content: object) -> list[str]:
     if isinstance(content, str):
         return [content]
@@ -398,3 +618,32 @@ def _coerce_json_object(value: object) -> Mapping[str, Any]:
         if isinstance(parsed, Mapping):
             return parsed
     raise ProviderResponseFormatError("Provider did not return a JSON object")
+
+
+def _int_or_none(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _json_object_arguments(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        if not value.strip():
+            return {}
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ProviderResponseFormatError("Provider returned invalid tool arguments") from exc
+        if isinstance(parsed, Mapping):
+            return dict(parsed)
+    raise ProviderResponseFormatError("Provider returned non-object tool arguments")

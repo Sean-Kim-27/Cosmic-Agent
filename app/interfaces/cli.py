@@ -91,7 +91,7 @@ class RichCLIAdapter:
             self.history.append(ChatMessage("assistant", answer))
             if self.parse_cgi:
                 task = asyncio.create_task(
-                    self.cgi_parser.parse_and_store_safely(
+                    self.cgi_parser.enqueue_and_process_safely(
                         CGIParseJob(
                             session_id=self.session_id,
                             user_message=message,

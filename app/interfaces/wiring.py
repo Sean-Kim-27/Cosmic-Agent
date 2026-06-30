@@ -7,7 +7,7 @@ from functools import lru_cache
 from app.agent import CGIBackgroundParser, CosmicAgentService, LLMProviderFactory
 from app.agent.runtime import LLMRuntimeRegistry
 from app.config import ConfigManager, load_settings
-from app.core import SQLiteCGIMemoryStore
+from app.core import SQLiteCGIMemoryStore, SQLiteUsageStore
 
 
 @lru_cache
@@ -32,11 +32,18 @@ def get_cgi_memory_store() -> SQLiteCGIMemoryStore:
 
 
 @lru_cache
+def get_usage_store() -> SQLiteUsageStore:
+    settings = get_config_manager().get_effective_settings()
+    return SQLiteUsageStore(settings.usage_db_path)
+
+
+@lru_cache
 def get_agent_service() -> CosmicAgentService:
     return CosmicAgentService(
         get_config_manager(),
         get_provider_factory(),
         get_runtime_registry(),
+        get_usage_store(),
     )
 
 
@@ -47,4 +54,5 @@ def get_cgi_background_parser() -> CGIBackgroundParser:
         get_provider_factory(),
         get_runtime_registry(),
         get_cgi_memory_store(),
+        get_usage_store(),
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -12,7 +13,13 @@ from app.agent import (
     CGIParseJob,
 )
 from app.api.application import create_app
-from app.api.dependencies import get_agent_service, get_cgi_background_parser
+from app.api.dependencies import (
+    get_agent_service,
+    get_cgi_background_parser,
+    get_cgi_memory_store,
+    get_chat_history_store,
+)
+from app.core import SQLiteCGIMemoryStore, SQLiteChatHistoryStore
 
 
 class FakeAgentService:
@@ -28,15 +35,22 @@ class FakeCGIParser:
     def __init__(self) -> None:
         self.jobs: list[CGIParseJob] = []
 
-    async def parse_and_store_safely(self, job: CGIParseJob) -> None:
+    async def enqueue_and_process_safely(self, job: CGIParseJob) -> None:
         self.jobs.append(job)
 
 
-def test_chat_stream_emits_sse_and_background_parser_receives_full_answer() -> None:
+def test_chat_stream_emits_sse_and_background_parser_receives_full_answer(
+    tmp_path: Path,
+) -> None:
     parser = FakeCGIParser()
+    db_path = tmp_path / "memory.sqlite3"
+    history_store = SQLiteChatHistoryStore(db_path)
+    memory_store = SQLiteCGIMemoryStore(db_path)
     app = create_app()
     app.dependency_overrides[get_agent_service] = lambda: FakeAgentService()
     app.dependency_overrides[get_cgi_background_parser] = lambda: parser
+    app.dependency_overrides[get_chat_history_store] = lambda: history_store
+    app.dependency_overrides[get_cgi_memory_store] = lambda: memory_store
 
     with TestClient(app) as client:
         with client.stream(
@@ -62,10 +76,20 @@ def test_chat_stream_emits_sse_and_background_parser_receives_full_answer() -> N
             assistant_answer="안녕!",
         )
     ]
+    stored_messages = history_store.list_messages("s1")
+    assert [message.role for message in stored_messages] == ["user", "assistant"]
+    assert [message.content for message in stored_messages] == ["안녕?", "안녕!"]
+
+    with TestClient(app) as client:
+        history = client.get("/api/v1/chat/history/s1")
+
+    assert history.status_code == 200
+    assert [message["role"] for message in history.json()["messages"]] == ["user", "assistant"]
 
 
-def test_chat_stream_skips_background_parse_on_stream_error() -> None:
+def test_chat_stream_skips_background_parse_on_stream_error(tmp_path: Path) -> None:
     parser = FakeCGIParser()
+    history_store = SQLiteChatHistoryStore(tmp_path / "memory.sqlite3")
 
     class ErrorService:
         async def stream_reply_events(self, request: AgentChatRequest) -> AsyncIterator[object]:
@@ -75,6 +99,7 @@ def test_chat_stream_skips_background_parse_on_stream_error() -> None:
     app = create_app()
     app.dependency_overrides[get_agent_service] = lambda: ErrorService()
     app.dependency_overrides[get_cgi_background_parser] = lambda: parser
+    app.dependency_overrides[get_chat_history_store] = lambda: history_store
 
     with TestClient(app) as client:
         response = client.post("/api/v1/chat/stream", json={"message": "hello"})
@@ -84,13 +109,16 @@ def test_chat_stream_skips_background_parse_on_stream_error() -> None:
         response.text
     )
     assert parser.jobs == []
+    assert history_store.list_messages("s1") == []
 
 
-def test_chat_stream_can_disable_background_parse() -> None:
+def test_chat_stream_can_disable_background_parse(tmp_path: Path) -> None:
     parser = FakeCGIParser()
+    history_store = SQLiteChatHistoryStore(tmp_path / "memory.sqlite3")
     app = create_app()
     app.dependency_overrides[get_agent_service] = lambda: FakeAgentService()
     app.dependency_overrides[get_cgi_background_parser] = lambda: parser
+    app.dependency_overrides[get_chat_history_store] = lambda: history_store
 
     with TestClient(app) as client:
         response = client.post(
