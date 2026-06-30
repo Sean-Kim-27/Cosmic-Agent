@@ -220,7 +220,7 @@ def _build_codex_client(api_key: str | None) -> object:
 def _build_nvidia_client(api_key: str | None) -> object:
     from openai import AsyncOpenAI
     return AsyncOpenAI(api_key=api_key,
-                       base_url="https://integrate.api.nvidia.com/v1",
+                base_url="https://integrate.api.nvidia.com/v1",
 		       timeout=60.0
                        )
 
