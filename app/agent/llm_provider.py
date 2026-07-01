@@ -217,12 +217,15 @@ def _build_codex_client(api_key: str | None) -> object:
     del api_key
     return create_codex_client()
 
+
 def _build_nvidia_client(api_key: str | None) -> object:
     from openai import AsyncOpenAI
-    return AsyncOpenAI(api_key=api_key,
-                       base_url="https://integrate.api.nvidia.com/v1",
-		               timeout=60.0
-                       )
+
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://integrate.api.nvidia.com/v1",
+        timeout=60.0,
+    )
 
 
 def builtin_provider_definitions() -> tuple[ProviderDefinition, ...]:

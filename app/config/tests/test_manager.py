@@ -40,21 +40,28 @@ def test_database_overrides_apply_immediately_and_secrets_are_encrypted(
 
     manager.set_override("system_prompt", "Updated prompt")
     manager.set_override("openai_api_key", "database-secret-key")
+    manager.set_override("nvidia_api_key", "nvidia-database-secret-key")
 
     effective = manager.get_effective_settings()
     assert effective.system_prompt == "Updated prompt"
     assert effective.openai_api_key is not None
     assert effective.openai_api_key.get_secret_value() == "database-secret-key"
+    assert effective.nvidia_api_key is not None
+    assert effective.nvidia_api_key.get_secret_value() == "nvidia-database-secret-key"
 
     with sqlite3.connect(store.path) as connection:
         rows = connection.execute("SELECT key, value FROM runtime_settings ORDER BY key").fetchall()
     serialized_database = repr(rows)
     assert "database-secret-key" not in serialized_database
+    assert "nvidia-database-secret-key" not in serialized_database
 
     statuses = {status.key: status for status in manager.list_statuses()}
     assert statuses["openai_api_key"].source == "database"
     assert statuses["openai_api_key"].configured is True
     assert statuses["openai_api_key"].value is None
+    assert statuses["nvidia_api_key"].source == "database"
+    assert statuses["nvidia_api_key"].configured is True
+    assert statuses["nvidia_api_key"].value is None
     assert statuses["system_prompt"].value == "Updated prompt"
 
 

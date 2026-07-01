@@ -6,7 +6,13 @@ import pytest
 
 from app.agent.llm_provider import LLMClientBinding
 from app.agent.messages import ChatMessage
-from app.agent.runtime import AnthropicRuntime, GoogleRuntime, OpenAIRuntime
+from app.agent.runtime import (
+    AnthropicRuntime,
+    GoogleRuntime,
+    NvidiaRuntime,
+    OpenAIRuntime,
+    ProviderResponseFormatError,
+)
 
 
 class AsyncItems:
@@ -45,6 +51,27 @@ class FakeOpenAICompletions:
 class FakeOpenAIClient:
     def __init__(self) -> None:
         self.chat = type("Chat", (), {"completions": FakeOpenAICompletions()})()
+
+
+class FakeNvidiaCompletions:
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.calls: list[dict[str, Any]] = []
+
+    async def create(self, **kwargs: Any) -> object:
+        self.calls.append(kwargs)
+        return self.response
+
+
+class FakeNvidiaClient:
+    def __init__(self, response: object, polls: list[object] | None = None) -> None:
+        self.chat = type("Chat", (), {"completions": FakeNvidiaCompletions(response)})()
+        self.polls = list(polls or [])
+        self.poll_calls: list[tuple[str, object]] = []
+
+    async def get(self, path: str, *, cast_to: object) -> object:
+        self.poll_calls.append((path, cast_to))
+        return self.polls.pop(0)
 
 
 class FakeAnthropicMessages:
@@ -132,6 +159,86 @@ async def test_openai_runtime_uses_stream_true_and_json_response_format() -> Non
     assert client.chat.completions.calls[0]["stream_options"] == {"include_usage": True}
     assert client.chat.completions.calls[1]["response_format"] == {"type": "json_object"}
     assert payload == {"nodes": [], "edges": []}
+
+
+@pytest.mark.asyncio
+async def test_nvidia_runtime_polls_pending_completion_before_reading_choices() -> None:
+    client = FakeNvidiaClient(
+        {"requestId": "pending-request-123"},
+        polls=[
+            {"requestId": "pending-request-123"},
+            {
+                "choices": [{"message": {"content": "NVIDIA answer"}}],
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                },
+            },
+        ],
+    )
+    binding = LLMClientBinding("nvidia", "minimaxai/minimax-m2.5", client)
+    runtime = NvidiaRuntime(poll_interval_seconds=0, max_poll_attempts=3)
+
+    chunks = [
+        chunk
+        async for chunk in runtime.stream_text(
+            binding,
+            [ChatMessage("system", "sys"), ChatMessage("user", "hi")],
+        )
+    ]
+
+    assert "".join(chunk.text for chunk in chunks) == "NVIDIA answer"
+    assert chunks[-1].prompt_tokens == 4
+    assert chunks[-1].completion_tokens == 2
+    assert chunks[-1].total_tokens == 6
+    assert chunks[-1].usage_source == "nvidia_completion_usage"
+    assert client.chat.completions.calls == [
+        {
+            "model": "minimaxai/minimax-m2.5",
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+            ],
+        }
+    ]
+    assert [path for path, _ in client.poll_calls] == [
+        "/status/pending-request-123",
+        "/status/pending-request-123",
+    ]
+    assert all(cast_to == dict[str, object] for _, cast_to in client.poll_calls)
+
+
+@pytest.mark.asyncio
+async def test_nvidia_runtime_surfaces_provider_error_instead_of_choices_error() -> None:
+    client = FakeNvidiaClient({"detail": "The selected model is unavailable"})
+    binding = LLMClientBinding("nvidia", "retired/model", client)
+    runtime = NvidiaRuntime(poll_interval_seconds=0)
+
+    with pytest.raises(
+        ProviderResponseFormatError,
+        match="NVIDIA API returned an error.*selected model is unavailable",
+    ):
+        _ = [
+            chunk
+            async for chunk in runtime.stream_text(
+                binding,
+                [ChatMessage("user", "hi")],
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_nvidia_json_generation_does_not_require_response_format_support() -> None:
+    client = FakeNvidiaClient({"choices": [{"message": {"content": '{"nodes":[],"edges":[]}'}}]})
+    binding = LLMClientBinding("nvidia", "nvidia/test-model", client)
+    runtime = NvidiaRuntime(poll_interval_seconds=0)
+
+    payload = await runtime.generate_json(binding, "answer", {"type": "object"})
+
+    assert payload == {"nodes": [], "edges": []}
+    assert "response_format" not in client.chat.completions.calls[0]
 
 
 @pytest.mark.asyncio

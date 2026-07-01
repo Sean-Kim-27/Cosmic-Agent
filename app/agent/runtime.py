@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
+import logging
 import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -15,8 +17,13 @@ from app.agent.messages import ChatMessage
 from app.core import MCPTool, MCPToolCall
 
 _PROVIDER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_NVIDIA_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 _DEFAULT_MAX_TEXT_TOKENS = 4_096
 _DEFAULT_JSON_TOKENS = 2_048
+_NVIDIA_POLL_INTERVAL_SECONDS = 1.0
+_NVIDIA_MAX_POLL_ATTEMPTS = 60
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class LLMRuntimeError(RuntimeError):
@@ -210,30 +217,167 @@ class OpenAIRuntime:
             )
         )
         return _coerce_json_object(_extract_openai_chat_message(response))
-    
+
+
 class NvidiaRuntime(OpenAIRuntime):
-    """Runtime for NVIDIA OpenAI-compatible Chat Completions."""
+    """Runtime for NVIDIA chat completions, including asynchronous 202 results."""
+
+    def __init__(
+        self,
+        *,
+        poll_interval_seconds: float = _NVIDIA_POLL_INTERVAL_SECONDS,
+        max_poll_attempts: int = _NVIDIA_MAX_POLL_ATTEMPTS,
+    ) -> None:
+        if poll_interval_seconds < 0:
+            raise ValueError("poll_interval_seconds must not be negative")
+        if max_poll_attempts < 1:
+            raise ValueError("max_poll_attempts must be at least one")
+        self._poll_interval_seconds = poll_interval_seconds
+        self._max_poll_attempts = max_poll_attempts
 
     async def stream_text(
         self,
         binding: LLMClientBinding,
         messages: Sequence[ChatMessage],
     ) -> AsyncIterator[ProviderTextChunk]:
-        chat = _chat_completions(binding.client)
+        response = await self._create_completion(
+            binding,
+            messages=_openai_messages(messages),
+        )
+        text = _extract_openai_chat_message(response, provider="NVIDIA")
+        if text:
+            yield ProviderTextChunk(text=text)
+        usage = _extract_openai_completion_usage(
+            response,
+            usage_source="nvidia_completion_usage",
+        )
+        if usage is not None:
+            yield usage
 
+    async def select_tool_calls(
+        self,
+        binding: LLMClientBinding,
+        messages: Sequence[ChatMessage],
+        catalog: MCPToolCatalog,
+    ) -> tuple[MCPToolCall, ...]:
+        response = await self._create_completion(
+            binding,
+            messages=_openai_messages(messages),
+            tools=catalog.openai_tools(),
+            tool_choice="auto",
+        )
+        return _extract_openai_tool_calls(response, catalog)
+
+    async def generate_json(
+        self,
+        binding: LLMClientBinding,
+        prompt: str,
+        schema: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        response = await self._create_completion(
+            binding,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Return only one valid JSON object matching the provided schema. "
+                        "Do not include markdown fences or prose."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"JSON schema:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+                        f"Source text:\n{prompt}"
+                    ),
+                },
+            ],
+        )
+        return _coerce_json_object(_extract_openai_chat_message(response, provider="NVIDIA"))
+
+    async def _create_completion(
+        self,
+        binding: LLMClientBinding,
+        **kwargs: object,
+    ) -> object:
+        chat = _chat_completions(binding.client)
         response = await _maybe_await(
             chat.create(
                 model=binding.model,
-                messages=_openai_messages(messages),
                 stream=False,
+                **kwargs,
+            )
+        )
+        return await self._resolve_pending_response(binding, response)
+
+    async def _resolve_pending_response(
+        self,
+        binding: LLMClientBinding,
+        response: object,
+    ) -> object:
+        request_id: str | None = None
+        for poll_attempt in range(self._max_poll_attempts + 1):
+            if _get(response, "choices"):
+                if request_id is not None:
+                    logger.info(
+                        "NVIDIA completion polling finished model=%s request_id_suffix=%s "
+                        "poll_attempts=%s",
+                        binding.model,
+                        request_id[-8:],
+                        poll_attempt,
+                    )
+                return response
+
+            error_message = _nvidia_error_message(response)
+            if error_message is not None:
+                raise ProviderResponseFormatError(
+                    f"NVIDIA API returned an error for model '{binding.model}': {error_message}"
+                )
+
+            request_id = _nvidia_request_id(response)
+            if request_id is None:
+                response_fields = ", ".join(_response_field_names(response)) or "<none>"
+                logger.warning(
+                    "NVIDIA completion response missing choices model=%s response_fields=%s",
+                    binding.model,
+                    response_fields,
+                )
+                raise ProviderResponseFormatError(
+                    "NVIDIA response did not include choices or a pending requestId "
+                    f"(model='{binding.model}', response_fields={response_fields})"
+                )
+            if poll_attempt >= self._max_poll_attempts:
+                raise ProviderResponseFormatError(
+                    "NVIDIA completion remained pending after "
+                    f"{self._max_poll_attempts} polls (model='{binding.model}')"
+                )
+
+            if poll_attempt == 0:
+                logger.info(
+                    "NVIDIA completion is pending model=%s request_id_suffix=%s",
+                    binding.model,
+                    request_id[-8:],
+                )
+            if self._poll_interval_seconds:
+                await asyncio.sleep(self._poll_interval_seconds)
+            response = await self._poll_completion(binding.client, request_id)
+
+        raise ProviderResponseFormatError(
+            f"NVIDIA completion polling ended unexpectedly (model='{binding.model}')"
+        )
+
+    @staticmethod
+    async def _poll_completion(client: object, request_id: str) -> object:
+        getter = getattr(client, "get", None)
+        if not callable(getter):
+            raise LLMRuntimeError("NVIDIA client does not support pending-result polling")
+        return await _maybe_await(
+            getter(
+                f"/status/{request_id}",
+                cast_to=dict[str, object],
             )
         )
 
-        print("NVIDIA RAW RESPONSE:", response)
-
-        text = _extract_openai_chat_message(response)
-        if text:
-            yield ProviderTextChunk(text=text)
 
 class AnthropicRuntime:
     """Runtime for Anthropic Messages clients."""
@@ -454,7 +598,7 @@ def builtin_provider_runtimes() -> dict[str, ProviderRuntime]:
         "anthropic": AnthropicRuntime(),
         "google": GoogleRuntime(),
         "codex": CodexRuntime(),
-	"nvidia": NvidiaRuntime(),
+        "nvidia": NvidiaRuntime(),
     }
 
 
@@ -547,16 +691,32 @@ def _extract_openai_usage(event: object) -> ProviderTextChunk | None:
     )
 
 
-def _extract_openai_chat_message(response: object) -> str:
+def _extract_openai_chat_message(response: object, *, provider: str = "OpenAI") -> str:
     choices = _get(response, "choices") or []
     if not choices:
-        raise ProviderResponseFormatError("OpenAI JSON response did not include choices")
+        raise ProviderResponseFormatError(f"{provider} response did not include choices")
     message = _get(choices[0], "message")
     content = _get(message, "content")
     parts = _text_parts(content)
     if not parts:
-        raise ProviderResponseFormatError("OpenAI JSON response did not include content")
+        raise ProviderResponseFormatError(f"{provider} response did not include content")
     return "".join(parts)
+
+
+def _extract_openai_completion_usage(
+    response: object,
+    *,
+    usage_source: str,
+) -> ProviderTextChunk | None:
+    usage = _get(response, "usage")
+    if usage is None:
+        return None
+    return ProviderTextChunk(
+        prompt_tokens=_int_or_none(_get(usage, "prompt_tokens")),
+        completion_tokens=_int_or_none(_get(usage, "completion_tokens")),
+        total_tokens=_int_or_none(_get(usage, "total_tokens")),
+        usage_source=usage_source,
+    )
 
 
 def _extract_openai_tool_calls(
@@ -768,3 +928,47 @@ def _json_object_arguments(value: object) -> dict[str, object]:
         if isinstance(parsed, Mapping):
             return dict(parsed)
     raise ProviderResponseFormatError("Provider returned non-object tool arguments")
+
+
+def _nvidia_request_id(response: object) -> str | None:
+    for key in ("requestId", "request_id"):
+        value = _response_value(response, key)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if _NVIDIA_REQUEST_ID_PATTERN.fullmatch(normalized):
+                return normalized
+    return None
+
+
+def _nvidia_error_message(response: object) -> str | None:
+    for key in ("error", "detail"):
+        value = _response_value(response, key)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())[:500]
+        nested_message = _get(value, "message")
+        if isinstance(nested_message, str) and nested_message.strip():
+            return " ".join(nested_message.split())[:500]
+    return None
+
+
+def _response_value(response: object, key: str) -> object | None:
+    value = _get(response, key)
+    if value is not None:
+        return value
+    model_extra = getattr(response, "model_extra", None)
+    if isinstance(model_extra, Mapping):
+        return model_extra.get(key)
+    return None
+
+
+def _response_field_names(response: object) -> tuple[str, ...]:
+    if isinstance(response, Mapping):
+        return tuple(sorted(str(key) for key in response))
+    fields: set[str] = set()
+    model_fields_set = getattr(response, "model_fields_set", None)
+    if model_fields_set:
+        fields.update(str(key) for key in model_fields_set)
+    model_extra = getattr(response, "model_extra", None)
+    if isinstance(model_extra, Mapping):
+        fields.update(str(key) for key in model_extra)
+    return tuple(sorted(fields))

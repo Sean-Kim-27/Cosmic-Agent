@@ -12,6 +12,7 @@ def test_settings_read_multi_provider_keys_from_environment(
     monkeypatch.setenv("OPENAI_API_KEY", "openai-env-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-env-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "google-env-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-env-key")
     monkeypatch.setenv("CONFIG_DB_PATH", str(tmp_path / "config.sqlite3"))
     monkeypatch.setenv("CGI_MEMORY_DB_PATH", str(tmp_path / "memory.sqlite3"))
     monkeypatch.setenv("CGI_PARSE_PROVIDER", "OpenAI")
@@ -28,6 +29,8 @@ def test_settings_read_multi_provider_keys_from_environment(
     assert settings.anthropic_api_key.get_secret_value() == "anthropic-env-key"
     assert settings.google_api_key is not None
     assert settings.google_api_key.get_secret_value() == "google-env-key"
+    assert settings.nvidia_api_key is not None
+    assert settings.nvidia_api_key.get_secret_value() == "nvidia-env-key"
     assert settings.config_db_path == tmp_path / "config.sqlite3"
     assert settings.cgi_memory_db_path == tmp_path / "memory.sqlite3"
     assert settings.cgi_parse_provider == "openai"

@@ -18,6 +18,7 @@ SECRET_SETTING_KEYS = frozenset(
         "openai_api_key",
         "anthropic_api_key",
         "google_api_key",
+        "nvidia_api_key",
     }
 )
 OVERRIDABLE_SETTING_KEYS = frozenset(
