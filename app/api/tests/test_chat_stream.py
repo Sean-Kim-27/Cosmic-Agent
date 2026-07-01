@@ -19,7 +19,7 @@ from app.api.dependencies import (
     get_cgi_memory_store,
     get_chat_history_store,
 )
-from app.core import SQLiteCGIMemoryStore, SQLiteChatHistoryStore
+from app.core import ChatHistoryMessageWrite, SQLiteCGIMemoryStore, SQLiteChatHistoryStore
 
 
 class FakeAgentService:
@@ -131,3 +131,37 @@ def test_chat_stream_can_disable_background_parse(tmp_path: Path) -> None:
         'event: done\ndata: {"provider":"openai","model":"gpt-stream-test","parse_cgi":false}'
     ) in response.text
     assert parser.jobs == []
+
+
+def test_chat_sessions_can_be_listed_and_cleared(tmp_path: Path) -> None:
+    history_store = SQLiteChatHistoryStore(tmp_path / "memory.sqlite3")
+    history_store.save_message(ChatHistoryMessageWrite(session_id="old", role="user", content="첫 질문"))
+    history_store.save_message(
+        ChatHistoryMessageWrite(
+            session_id="old",
+            role="assistant",
+            content="첫 답변",
+            provider="nvidia",
+            model="minimaxai/minimax-m3",
+        )
+    )
+    history_store.save_message(ChatHistoryMessageWrite(session_id="new", role="user", content="새 질문"))
+    app = create_app()
+    app.dependency_overrides[get_chat_history_store] = lambda: history_store
+    app.dependency_overrides[get_cgi_memory_store] = lambda: SQLiteCGIMemoryStore(tmp_path / "memory.sqlite3")
+
+    with TestClient(app) as client:
+        sessions = client.get("/api/v1/chat/sessions")
+        cleared = client.delete("/api/v1/chat/history/old")
+        old_history = client.get("/api/v1/chat/history/old")
+
+    assert sessions.status_code == 200
+    assert [session["session_id"] for session in sessions.json()["sessions"]] == ["new", "old"]
+    assert sessions.json()["sessions"][0]["message_count"] == 1
+    assert sessions.json()["sessions"][0]["preview"] == "새 질문"
+    assert sessions.json()["sessions"][1]["message_count"] == 2
+    assert sessions.json()["sessions"][1]["provider"] == "nvidia"
+    assert sessions.json()["sessions"][1]["model"] == "minimaxai/minimax-m3"
+    assert cleared.status_code == 200
+    assert cleared.json() == {"session_id": "old", "deleted_messages": 2}
+    assert old_history.json()["messages"] == []

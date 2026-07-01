@@ -214,6 +214,30 @@ class ChatHistoryResponse(BaseModel):
     cgi_context: CGITreeResponse
 
 
+class ChatSessionSummaryResponse(BaseModel):
+    """One saved chat session shown in the dashboard switcher."""
+
+    session_id: str
+    message_count: int
+    preview: str
+    provider: str | None
+    model: str | None
+    updated_at: str
+
+
+class ChatSessionListResponse(BaseModel):
+    """Recent saved chat sessions."""
+
+    sessions: list[ChatSessionSummaryResponse]
+
+
+class ChatSessionClearResponse(BaseModel):
+    """Result after clearing a saved chat session."""
+
+    session_id: str
+    deleted_messages: int
+
+
 class CGIPruningEventResponse(BaseModel):
     """A pruning event emitted by the CGI memory maintenance boundary."""
 

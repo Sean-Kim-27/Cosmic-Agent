@@ -37,6 +37,24 @@ export interface ChatHistoryResponse {
   };
 }
 
+export interface ChatSessionSummary {
+  session_id: string;
+  message_count: number;
+  preview: string;
+  provider: string | null;
+  model: string | null;
+  updated_at: string;
+}
+
+export interface ChatSessionListResponse {
+  sessions: ChatSessionSummary[];
+}
+
+export interface ChatSessionClearResponse {
+  session_id: string;
+  deleted_messages: number;
+}
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;

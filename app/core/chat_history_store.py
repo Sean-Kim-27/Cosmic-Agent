@@ -36,6 +36,18 @@ class ChatHistoryMessage:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class ChatSessionSummary:
+    """Dashboard summary for switching between saved chat sessions."""
+
+    session_id: str
+    message_count: int
+    preview: str
+    provider: str | None
+    model: str | None
+    updated_at: str
+
+
 class SQLiteChatHistoryStore:
     """Small connection-per-operation chat history store.
 
@@ -127,6 +139,48 @@ class SQLiteChatHistoryStore:
                 (normalized_session_id, limit),
             ).fetchall()
         return [self._message_from_row(row) for row in rows]
+
+    def list_sessions(self, *, limit: int = 50) -> list[ChatSessionSummary]:
+        """Return recent chat sessions ordered by latest activity first."""
+
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                WITH latest AS (
+                    SELECT
+                        session_id,
+                        MAX(rowid) AS latest_rowid,
+                        COUNT(*) AS message_count
+                    FROM chat_messages
+                    GROUP BY session_id
+                )
+                SELECT
+                    latest.session_id,
+                    latest.message_count,
+                    message.content AS preview,
+                    message.provider AS provider,
+                    message.model AS model,
+                    message.created_at AS updated_at
+                FROM latest
+                JOIN chat_messages AS message ON message.rowid = latest.latest_rowid
+                ORDER BY message.created_at DESC, latest.latest_rowid DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            ChatSessionSummary(
+                session_id=str(row["session_id"]),
+                message_count=int(row["message_count"]),
+                preview=str(row["preview"]),
+                provider=str(row["provider"]) if row["provider"] is not None else None,
+                model=str(row["model"]) if row["model"] is not None else None,
+                updated_at=str(row["updated_at"]),
+            )
+            for row in rows
+        ]
 
     def clear_session(self, session_id: str) -> int:
         """Delete one session's dashboard history and return the deleted count."""

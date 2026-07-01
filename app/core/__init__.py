@@ -11,6 +11,7 @@ from app.core.cgi_schema import (
 from app.core.chat_history_store import (
     ChatHistoryMessage,
     ChatHistoryMessageWrite,
+    ChatSessionSummary,
     SQLiteChatHistoryStore,
 )
 from app.core.mcp_client import (
@@ -78,6 +79,7 @@ __all__ = [
     "CGIStaleJobRecoveryResult",
     "ChatHistoryMessage",
     "ChatHistoryMessageWrite",
+    "ChatSessionSummary",
     "LocalDirectoryMCPClient",
     "LLMUsageRecord",
     "LLMUsageSummary",

@@ -1,6 +1,8 @@
 import type {
   CGIParseJob,
   ChatHistoryResponse,
+  ChatSessionListResponse,
+  ChatSessionClearResponse,
   ChatStreamRequest,
   JobRetryResponse,
   StreamEvent,
@@ -28,6 +30,27 @@ export async function fetchChatHistory(sessionId: string): Promise<ChatHistoryRe
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch chat history: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchChatSessions(): Promise<ChatSessionListResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/chat/sessions?limit=100`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch chat sessions: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function clearChatHistory(sessionId: string): Promise<ChatSessionClearResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/chat/history/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to clear chat history: ${response.status}`);
   }
   return response.json();
 }

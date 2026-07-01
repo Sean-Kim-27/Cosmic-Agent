@@ -105,6 +105,8 @@ async def test_service_streams_text_without_inline_cgi_parsing(tmp_path: Path) -
     assert runtime.messages[0].role == "system"
     assert "System prompt" in runtime.messages[0].content
     assert "test-persona" in runtime.messages[0].content
+    assert "provider='codex', model='codex-test'" in runtime.messages[0].content
+    assert "do not infer or claim a different upstream brand name" in runtime.messages[0].content
     assert runtime.messages[-1] == ChatMessage("user", "Question?")
 
 

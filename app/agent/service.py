@@ -65,6 +65,8 @@ class CosmicAgentService:
             system_prompt=settings.system_prompt,
             persona=settings.persona,
             request=request,
+            provider=binding.provider,
+            model=binding.model,
             mcp_enabled=settings.mcp_enabled and self._mcp_client is not None,
         )
 
@@ -150,9 +152,17 @@ class CosmicAgentService:
         system_prompt: str,
         persona: str,
         request: AgentChatRequest,
+        provider: str,
+        model: str,
         mcp_enabled: bool = False,
     ) -> tuple[ChatMessage, ...]:
         persona_block = f"Persona: {persona}" if persona != "default" else "Persona: default"
+        runtime_identity_block = (
+            "Runtime identity: The active LLM route for this response is "
+            f"provider='{provider}', model='{model}'. If the user asks what model "
+            "or provider you are using, answer with exactly this runtime identity; "
+            "do not infer or claim a different upstream brand name."
+        )
         mcp_block = (
             "\n\nMCP tools may be available. If the user's request needs local files, "
             "external tool data, or system context exposed through MCP, call the relevant "
@@ -161,7 +171,10 @@ class CosmicAgentService:
             else ""
         )
         return (
-            ChatMessage("system", f"{system_prompt}\n\n{persona_block}{mcp_block}"),
+            ChatMessage(
+                "system",
+                f"{system_prompt}\n\n{persona_block}\n\n{runtime_identity_block}{mcp_block}",
+            ),
             *request.history,
             ChatMessage("user", request.message),
         )

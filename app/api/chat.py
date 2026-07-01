@@ -34,6 +34,9 @@ from app.api.schemas import (
     CGITreeResponse,
     ChatHistoryMessageResponse,
     ChatHistoryResponse,
+    ChatSessionClearResponse,
+    ChatSessionListResponse,
+    ChatSessionSummaryResponse,
     ChatStreamRequest,
 )
 from app.api.sse import encode_sse
@@ -205,6 +208,29 @@ async def _persist_completed_chat(
     )
 
 
+@router.get("/chat/sessions", response_model=ChatSessionListResponse)
+async def list_chat_sessions(
+    limit: int = Query(default=50, ge=1, le=200),
+    history_store: SQLiteChatHistoryStore = Depends(get_chat_history_store),
+) -> ChatSessionListResponse:
+    """Return recent persisted dashboard chat sessions for the session switcher."""
+
+    sessions = await asyncio.to_thread(history_store.list_sessions, limit=limit)
+    return ChatSessionListResponse(
+        sessions=[
+            ChatSessionSummaryResponse(
+                session_id=session.session_id,
+                message_count=session.message_count,
+                preview=session.preview,
+                provider=session.provider,
+                model=session.model,
+                updated_at=session.updated_at,
+            )
+            for session in sessions
+        ]
+    )
+
+
 @router.get("/chat/history/{session_id}", response_model=ChatHistoryResponse)
 async def get_chat_history(
     session_id: str,
@@ -258,7 +284,7 @@ async def get_chat_history(
                             summary=node.summary,
                             weight=node.weight,
                             tags=list(node.tags),
-                            metadata=node.metadata,
+                            metadata=dict(node.metadata),
                             created_at=node.created_at,
                         )
                         for node in interaction.nodes
@@ -271,7 +297,7 @@ async def get_chat_history(
                             target_label=edge.target_label,
                             relation=edge.relation,
                             weight=edge.weight,
-                            metadata=edge.metadata,
+                            metadata=dict(edge.metadata),
                             created_at=edge.created_at,
                         )
                         for edge in interaction.edges
@@ -281,3 +307,14 @@ async def get_chat_history(
             ]
         ),
     )
+
+
+@router.delete("/chat/history/{session_id}", response_model=ChatSessionClearResponse)
+async def clear_chat_history(
+    session_id: str,
+    history_store: SQLiteChatHistoryStore = Depends(get_chat_history_store),
+) -> ChatSessionClearResponse:
+    """Clear one dashboard chat session's persisted message history."""
+
+    deleted = await asyncio.to_thread(history_store.clear_session, session_id)
+    return ChatSessionClearResponse(session_id=session_id, deleted_messages=deleted)
