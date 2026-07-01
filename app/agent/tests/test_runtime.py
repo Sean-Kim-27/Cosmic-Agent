@@ -54,17 +54,23 @@ class FakeOpenAIClient:
 
 
 class FakeNvidiaCompletions:
-    def __init__(self, response: object) -> None:
-        self.response = response
+    def __init__(self, response: object | list[object]) -> None:
+        self.responses = list(response) if isinstance(response, list) else [response]
         self.calls: list[dict[str, Any]] = []
 
     async def create(self, **kwargs: Any) -> object:
         self.calls.append(kwargs)
-        return self.response
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+        return self.responses[0]
 
 
 class FakeNvidiaClient:
-    def __init__(self, response: object, polls: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        response: object | list[object],
+        polls: list[object] | None = None,
+    ) -> None:
         self.chat = type("Chat", (), {"completions": FakeNvidiaCompletions(response)})()
         self.polls = list(polls or [])
         self.poll_calls: list[tuple[str, object]] = []
@@ -219,6 +225,84 @@ async def test_nvidia_runtime_surfaces_provider_error_instead_of_choices_error()
     with pytest.raises(
         ProviderResponseFormatError,
         match="NVIDIA API returned an error.*selected model is unavailable",
+    ):
+        _ = [
+            chunk
+            async for chunk in runtime.stream_text(
+                binding,
+                [ChatMessage("user", "hi")],
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_nvidia_runtime_retries_empty_m3_completion_with_model_defaults() -> None:
+    client = FakeNvidiaClient(
+        [
+            {
+                "id": "chatcmpl-empty",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 0,
+                    "total_tokens": 11,
+                },
+            },
+            {
+                "id": "chatcmpl-success",
+                "choices": [{"message": {"content": "MiniMax M3 answer"}}],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 4,
+                    "total_tokens": 15,
+                },
+            },
+        ]
+    )
+    binding = LLMClientBinding("nvidia", "minimaxai/minimax-m3", client)
+    runtime = NvidiaRuntime(
+        poll_interval_seconds=0,
+        empty_choice_max_retries=1,
+        empty_choice_retry_base_seconds=0,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in runtime.stream_text(
+            binding,
+            [ChatMessage("user", "hi")],
+        )
+    ]
+
+    assert "".join(chunk.text for chunk in chunks) == "MiniMax M3 answer"
+    assert len(client.chat.completions.calls) == 2
+    assert all(call["max_tokens"] == 8_192 for call in client.chat.completions.calls)
+    assert all(call["temperature"] == 1.0 for call in client.chat.completions.calls)
+    assert all(call["top_p"] == 0.95 for call in client.chat.completions.calls)
+
+
+@pytest.mark.asyncio
+async def test_nvidia_runtime_reports_usage_after_empty_choice_retries_exhausted() -> None:
+    empty_response = {
+        "id": "chatcmpl-empty",
+        "choices": [],
+        "usage": {
+            "prompt_tokens": 11,
+            "completion_tokens": 0,
+            "total_tokens": 11,
+        },
+    }
+    client = FakeNvidiaClient(empty_response)
+    binding = LLMClientBinding("nvidia", "minimaxai/minimax-m3", client)
+    runtime = NvidiaRuntime(
+        poll_interval_seconds=0,
+        empty_choice_max_retries=1,
+        empty_choice_retry_base_seconds=0,
+    )
+
+    with pytest.raises(
+        ProviderResponseFormatError,
+        match=r"empty successful completion after 2 attempts.*completion_tokens=0",
     ):
         _ = [
             chunk

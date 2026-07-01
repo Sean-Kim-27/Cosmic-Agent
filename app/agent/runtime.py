@@ -22,6 +22,15 @@ _DEFAULT_MAX_TEXT_TOKENS = 4_096
 _DEFAULT_JSON_TOKENS = 2_048
 _NVIDIA_POLL_INTERVAL_SECONDS = 1.0
 _NVIDIA_MAX_POLL_ATTEMPTS = 60
+_NVIDIA_EMPTY_CHOICE_MAX_RETRIES = 2
+_NVIDIA_EMPTY_CHOICE_RETRY_BASE_SECONDS = 0.5
+_NVIDIA_MODEL_REQUEST_DEFAULTS: dict[str, dict[str, object]] = {
+    "minimaxai/minimax-m3": {
+        "max_tokens": 8_192,
+        "temperature": 1.0,
+        "top_p": 0.95,
+    }
+}
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -36,6 +45,10 @@ class ProviderRuntimeNotRegisteredError(LLMRuntimeError):
 
 class ProviderResponseFormatError(LLMRuntimeError):
     """Raised when a provider response cannot be interpreted safely."""
+
+
+class _NvidiaEmptyChoicesError(ProviderResponseFormatError):
+    """Raised for a success-shaped NVIDIA response with no completion choice."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,13 +240,21 @@ class NvidiaRuntime(OpenAIRuntime):
         *,
         poll_interval_seconds: float = _NVIDIA_POLL_INTERVAL_SECONDS,
         max_poll_attempts: int = _NVIDIA_MAX_POLL_ATTEMPTS,
+        empty_choice_max_retries: int = _NVIDIA_EMPTY_CHOICE_MAX_RETRIES,
+        empty_choice_retry_base_seconds: float = _NVIDIA_EMPTY_CHOICE_RETRY_BASE_SECONDS,
     ) -> None:
         if poll_interval_seconds < 0:
             raise ValueError("poll_interval_seconds must not be negative")
         if max_poll_attempts < 1:
             raise ValueError("max_poll_attempts must be at least one")
+        if empty_choice_max_retries < 0:
+            raise ValueError("empty_choice_max_retries must not be negative")
+        if empty_choice_retry_base_seconds < 0:
+            raise ValueError("empty_choice_retry_base_seconds must not be negative")
         self._poll_interval_seconds = poll_interval_seconds
         self._max_poll_attempts = max_poll_attempts
+        self._empty_choice_max_retries = empty_choice_max_retries
+        self._empty_choice_retry_base_seconds = empty_choice_retry_base_seconds
 
     async def stream_text(
         self,
@@ -301,14 +322,46 @@ class NvidiaRuntime(OpenAIRuntime):
         **kwargs: object,
     ) -> object:
         chat = _chat_completions(binding.client)
-        response = await _maybe_await(
-            chat.create(
-                model=binding.model,
-                stream=False,
-                **kwargs,
+        request_options = _nvidia_model_request_defaults(binding.model)
+        request_options.update(kwargs)
+        total_attempts = self._empty_choice_max_retries + 1
+        last_empty_error: _NvidiaEmptyChoicesError | None = None
+
+        for attempt in range(1, total_attempts + 1):
+            response = await _maybe_await(
+                chat.create(
+                    model=binding.model,
+                    stream=False,
+                    **request_options,
+                )
             )
+            try:
+                return await self._resolve_pending_response(binding, response)
+            except _NvidiaEmptyChoicesError as exc:
+                last_empty_error = exc
+                if attempt >= total_attempts:
+                    break
+                delay_seconds = self._empty_choice_retry_base_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "NVIDIA returned an empty completion; retrying model=%s "
+                    "attempt=%s/%s delay_seconds=%.2f diagnostic=%s",
+                    binding.model,
+                    attempt,
+                    total_attempts,
+                    delay_seconds,
+                    str(exc),
+                )
+                if delay_seconds:
+                    await asyncio.sleep(delay_seconds)
+
+        if last_empty_error is not None:
+            raise ProviderResponseFormatError(
+                "NVIDIA returned an empty successful completion after "
+                f"{total_attempts} attempts (model='{binding.model}'; {last_empty_error})"
+            ) from last_empty_error
+        raise ProviderResponseFormatError(
+            f"NVIDIA completion retry loop ended unexpectedly (model='{binding.model}')"
         )
-        return await self._resolve_pending_response(binding, response)
 
     async def _resolve_pending_response(
         self,
@@ -337,6 +390,8 @@ class NvidiaRuntime(OpenAIRuntime):
             request_id = _nvidia_request_id(response)
             if request_id is None:
                 response_fields = ", ".join(_response_field_names(response)) or "<none>"
+                if "choices" in _response_field_names(response):
+                    raise _NvidiaEmptyChoicesError(_nvidia_empty_completion_diagnostic(response))
                 logger.warning(
                     "NVIDIA completion response missing choices model=%s response_fields=%s",
                     binding.model,
@@ -938,6 +993,25 @@ def _nvidia_request_id(response: object) -> str | None:
             if _NVIDIA_REQUEST_ID_PATTERN.fullmatch(normalized):
                 return normalized
     return None
+
+
+def _nvidia_model_request_defaults(model: str) -> dict[str, object]:
+    defaults = _NVIDIA_MODEL_REQUEST_DEFAULTS.get(model.strip().lower(), {})
+    return dict(defaults)
+
+
+def _nvidia_empty_completion_diagnostic(response: object) -> str:
+    usage = _get(response, "usage")
+    prompt_tokens = _int_or_none(_get(usage, "prompt_tokens"))
+    completion_tokens = _int_or_none(_get(usage, "completion_tokens"))
+    total_tokens = _int_or_none(_get(usage, "total_tokens"))
+    response_id = _response_value(response, "id")
+    response_id_suffix = response_id[-8:] if isinstance(response_id, str) else None
+    return (
+        f"response_id_suffix={response_id_suffix or '<none>'}, "
+        f"prompt_tokens={prompt_tokens}, completion_tokens={completion_tokens}, "
+        f"total_tokens={total_tokens}"
+    )
 
 
 def _nvidia_error_message(response: object) -> str | None:
