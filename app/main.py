@@ -11,6 +11,7 @@ import argparse
 
 from app.api.application import app
 from app.interfaces.cli import main as cli_main
+from app.interfaces.telegram import main as telegram_main
 
 __all__ = ["app", "main"]
 
@@ -21,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Cosmic Agent.")
     parser.add_argument(
         "--mode",
-        choices=("cli",),
+        choices=("cli", "telegram"),
         default="cli",
         help="Runtime mode. API mode is exposed as app.main:app for uvicorn.",
     )
@@ -48,6 +49,8 @@ def main(argv: list[str] | None = None) -> None:
         if args.no_cgi_parse:
             cli_args.append("--no-cgi-parse")
         cli_main(cli_args)
+    elif args.mode == "telegram":
+        telegram_main()
 
 
 if __name__ == "__main__":

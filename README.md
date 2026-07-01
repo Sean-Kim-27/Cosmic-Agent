@@ -8,7 +8,7 @@
 
 **Cosmic Agent** is a production-ready, highly extensible, autonomous AI Agent system. It transforms a standard LLM chat experience into a persistent, self-evolving database-driven cognitive agent by decoupling real-time token streaming from heavy asynchronous graph updates (CGI - Cosmic Graph Intelligence). 
 
-Equipped with dual interfaces (Vite+React Dashboard & Rich CLI), multi-LLM dynamic client routing, robust SQLite-backed task queuing with smart exponential backoff retry for quota protection, and full Model Context Protocol (MCP) tool orchestration, Cosmic Agent brings enterprise-grade agility to your local or cloud machine.
+Equipped with three interfaces (Vite+React Dashboard, Telegram polling bot & Rich CLI), multi-LLM dynamic client routing, robust SQLite-backed task queuing with smart exponential backoff retry for quota protection, and full Model Context Protocol (MCP) tool orchestration, Cosmic Agent brings enterprise-grade agility to your local or cloud machine.
 
 ---
 
@@ -17,7 +17,7 @@ Equipped with dual interfaces (Vite+React Dashboard & Rich CLI), multi-LLM dynam
 Cosmic Agent splits real-time cognitive responses from heavy graph memory extraction using a decoupled, asynchronous multi-worker queue topology.
 
 ```text
-[User Input] ──► [FastAPI / CLI Entrypoint]
+[User Input] ──► [FastAPI / Dashboard / Telegram / CLI Entrypoint]
                         │
                         ├──► (1) Dynamic LLM Client Request (OpenAI/Anthropic/Gemini)
                         │         │
@@ -46,7 +46,9 @@ Cosmic Agent splits real-time cognitive responses from heavy graph memory extrac
 - **🛠️ Production-Grade MCP Integration:** Built-in STDIO and HTTP/SSE JSON-RPC transports. The agent dynamically queries available capabilities via `tools/list`, performs autonomous function calls, sanitizes payload names, and transparently wraps data into bounded `<mcp_context>` blocks.
 - **🧠 Cosmic Graph Intelligence (CGI) & Pruning:** Self-managing memory network featuring stale-lock recovery loops, interaction sequence preservation with `rowid` sorting, and deterministic token conservation via `escape_node_pruner` and `blackhole_compressor`.
 - **🛡️ Smart Rate Limit & Robust Quota Shaving:** Intelligent error classification (`transient`, `quota`, `permanent`). If a Google free-tier or OpenAI 429 quota is exhausted, the job gracefully stops and locks under `QUOTA_LOCKED` status instead of hammering the server, preserving bandwidth and API health.
-- **🖥️ Dual Interfaces:** - **Vite + React Dashboard:** Modern SPA tracking live usage metrics, real-time message bubbles, deep-linkable session histories, and a full graphical JSON Queue monitor with an instant "Retry All" button.
+- **🖥️ Multi-Interface Access:**
+  - **Vite + React Dashboard:** Modern SPA tracking live usage metrics, real-time message bubbles, saved-session switching, current-session clearing, deep-linkable session histories, and a full graphical JSON Queue monitor with an instant "Retry All" button.
+  - **Telegram Polling Bot:** Optional allowlisted Telegram adapter backed by the same `CosmicAgentService` and SQLite history store. Supports `/new`, `/reset`/`/clear`, `/sessions`, `/use <session_id>`, and `/status`.
   - **Rich CLI Terminal:** Command-line wrapper rendering high-performance local textual streaming.
 - **🔒 Security Shielded:** Endpoint rate-limiting paired with header token validation (`X-Cosmic-API-Key` / Bearer token schema) avoiding local environment leaking.
 
@@ -63,6 +65,7 @@ Cosmic Agent splits real-time cognitive responses from heavy graph memory extrac
   │    ├── /config        # Dynamic environment schemas, SQLite migration matrices, secret management)
   │    └── /auth          # Codex token validation & OAuth abstraction
   ├── /dashboard          # Vite + React + TypeScript single-page application dashboard
+  ├── /deploy/systemd     # Example systemd units for production-style services
   ├── .github/workflows   # Continuous Integration pipeline (Linting, Formatting, Unit tests)
   ├── pyproject.toml      # Dependency declaration matrix
   └── docker-compose.yml  # Zero-config multi-container topology
@@ -86,6 +89,12 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=AIzaSy...
 FRONTEND_API_SECRET=your_super_secure_secret_api_key_here
 API_RATE_LIMIT_PER_MINUTE=60
+
+# Optional Telegram polling adapter
+TELEGRAM_BOT_TOKEN=123456789:replace-me
+TELEGRAM_ALLOWED_USER_IDS=123456789
+TELEGRAM_MAX_RESPONSE_CHARS=3900
+TELEGRAM_HISTORY_LIMIT=40
 ```
 
 ### 2. Run with Docker Compose (Recommended)
@@ -97,7 +106,18 @@ docker compose up -d --build
 - **FastAPI API Documentation (Swagger):** `http://localhost:8000/docs`
 - **Vite React Dashboard:** `http://localhost:15173/`
 
-### 3. Run Rich CLI Terminal Mode
+### 3. Run Telegram Polling Mode
+For a private Telegram interface, set `TELEGRAM_BOT_TOKEN` and the comma-separated `TELEGRAM_ALLOWED_USER_IDS` allowlist in `.env`, then run:
+
+```bash
+python -m app.main --mode telegram
+# or, after pip install -e .
+cosmic-agent-telegram
+```
+
+The bot reuses the same `CosmicAgentService` and SQLite history boundary as the dashboard. Telegram commands include `/new`, `/reset`/`/clear`, `/sessions`, `/use <session_id>`, and `/status`. A production-style unit template is available at `deploy/systemd/cosmic-agent-telegram.service`.
+
+### 4. Run Rich CLI Terminal Mode
 If you prefer running a direct textual interaction directly in your shell environment:
 
 ```bash

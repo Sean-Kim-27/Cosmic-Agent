@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _PROVIDER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -103,6 +104,11 @@ class Settings(BaseSettings):
     api_rate_limit_enabled: bool = Field(default=True)
     api_rate_limit_per_minute: int = Field(default=20, ge=1, le=10_000)
 
+    telegram_bot_token: SecretStr | None = None
+    telegram_allowed_user_ids: Annotated[tuple[int, ...], NoDecode] = Field(default_factory=tuple)
+    telegram_max_response_chars: int = Field(default=3900, ge=500, le=4096)
+    telegram_history_limit: int = Field(default=40, ge=1, le=200)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -147,6 +153,20 @@ class Settings(BaseSettings):
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("telegram_allowed_user_ids", mode="before")
+    @classmethod
+    def parse_telegram_allowed_user_ids(cls, value: object) -> tuple[int, ...]:
+        if value is None or value == "":
+            return ()
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",") if part.strip()]
+            return tuple(int(part) for part in parts)
+        if isinstance(value, int):
+            return (value,)
+        if isinstance(value, (list, tuple, set)):
+            return tuple(int(item) for item in value)
+        raise TypeError("telegram_allowed_user_ids must be a comma-separated string or sequence of integers")
 
     @field_validator("config_db_path", "cgi_memory_db_path", "usage_db_path", "mcp_stdio_cwd")
     @classmethod

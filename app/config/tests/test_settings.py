@@ -20,6 +20,10 @@ def test_settings_read_multi_provider_keys_from_environment(
     monkeypatch.setenv("CGI_PARSE_MAX_NODES", "12")
     monkeypatch.setenv("LLM_PROVIDER", "AnThRoPiC")
     monkeypatch.setenv("LLM_MODEL", "claude-test")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "123, 456")
+    monkeypatch.setenv("TELEGRAM_MAX_RESPONSE_CHARS", "2048")
+    monkeypatch.setenv("TELEGRAM_HISTORY_LIMIT", "25")
 
     settings = Settings(_env_file=None)
 
@@ -38,6 +42,11 @@ def test_settings_read_multi_provider_keys_from_environment(
     assert settings.cgi_parse_max_nodes == 12
     assert settings.default_provider == "anthropic"
     assert settings.default_model == "claude-test"
+    assert settings.telegram_bot_token is not None
+    assert settings.telegram_bot_token.get_secret_value() == "telegram-token"
+    assert settings.telegram_allowed_user_ids == (123, 456)
+    assert settings.telegram_max_response_chars == 2048
+    assert settings.telegram_history_limit == 25
 
 
 def test_google_api_key_takes_precedence_over_legacy_gemini_key(monkeypatch) -> None:

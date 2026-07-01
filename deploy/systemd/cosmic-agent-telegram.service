@@ -1,0 +1,22 @@
+[Unit]
+Description=Cosmic Agent Telegram Bot
+After=network-online.target cosmic-agent-api.service
+Wants=network-online.target cosmic-agent-api.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/Cosmic-Agent
+EnvironmentFile=/home/ubuntu/Cosmic-Agent/.env
+ExecStart=/home/ubuntu/Cosmic-Agent/.venv/bin/python -m app.main --mode telegram
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/Cosmic-Agent /home/ubuntu/.local/share/cosmic-agent
+
+[Install]
+WantedBy=multi-user.target

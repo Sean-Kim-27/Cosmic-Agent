@@ -27,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 cosmic-agent = "app.interfaces.cli:main"
+cosmic-agent-telegram = "app.interfaces.telegram:main"
 
 [project.optional-dependencies]
 dev = [
