@@ -4,6 +4,7 @@ import type {
   ChatSessionListResponse,
   ChatSessionClearResponse,
   ChatStreamRequest,
+  DashboardSummary,
   JobRetryResponse,
   StreamEvent,
 } from "./types";
@@ -63,6 +64,16 @@ export async function retryAllJobs(): Promise<JobRetryResponse> {
   });
   if (!response.ok) {
     throw new Error(`Failed to retry jobs: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchDashboardSummary(): Promise<DashboardSummary> {
+  const response = await fetch(`${API_BASE}/api/v1/dashboard/summary`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch dashboard summary: ${response.status}`);
   }
   return response.json();
 }

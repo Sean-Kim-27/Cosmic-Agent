@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from app.api.cgi import router as cgi_router
 from app.api.chat import router as chat_router
 from app.api.compat import router as compat_router
+from app.api.dashboard import router as dashboard_router
 from app.api.dependencies import get_cgi_background_parser, get_mcp_client
 from app.api.jobs import router as jobs_router
 from app.api.security import APISecurityMiddleware
@@ -39,6 +40,7 @@ def create_app(*, start_background_workers: bool = False) -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(usage_router)
     app.include_router(compat_router)
+    app.include_router(dashboard_router)
     return app
 
 

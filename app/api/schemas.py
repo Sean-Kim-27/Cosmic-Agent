@@ -388,3 +388,35 @@ class DataResponse(BaseModel):
     """Simple JSON API envelope."""
 
     data: Any
+
+
+class DashboardJobStatusCountResponse(BaseModel):
+    """One slice of the dashboard status distribution chart."""
+
+    status: Literal["PENDING", "PROCESSING", "COMPLETED", "FAILED", "QUOTA_LOCKED"]
+    count: int
+
+
+class DashboardHoursEntryResponse(BaseModel):
+    """One hourly bucket for the dashboard 24-hour chart."""
+
+    hour_utc: int = Field(ge=0, le=23)
+    count: int
+
+
+class DashboardSessionActivityResponse(BaseModel):
+    """One heatmap cell for the dashboard chat-session activity matrix."""
+
+    session_id: str
+    message_count: int
+
+
+class DashboardSummaryResponse(BaseModel):
+    """Aggregate metrics for the dashboard visualization page."""
+
+    job_status_counts: list[DashboardJobStatusCountResponse]
+    total_jobs: int
+    success_rate_percent: float
+    hourly_jobs_last_24h: list[DashboardHoursEntryResponse]
+    top_sessions_by_message_count: list[DashboardSessionActivityResponse]
+    generated_at: str

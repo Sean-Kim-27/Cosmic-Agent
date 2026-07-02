@@ -55,6 +55,30 @@ export interface ChatSessionClearResponse {
   deleted_messages: number;
 }
 
+export interface DashboardJobStatusCount {
+  status: JobStatus;
+  count: number;
+}
+
+export interface DashboardHourEntry {
+  hour_utc: number;
+  count: number;
+}
+
+export interface DashboardSessionActivity {
+  session_id: string;
+  message_count: number;
+}
+
+export interface DashboardSummary {
+  job_status_counts: DashboardJobStatusCount[];
+  total_jobs: number;
+  success_rate_percent: number;
+  hourly_jobs_last_24h: DashboardHourEntry[];
+  top_sessions_by_message_count: DashboardSessionActivity[];
+  generated_at: string;
+}
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;

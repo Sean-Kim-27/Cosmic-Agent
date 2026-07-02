@@ -101,7 +101,196 @@ textarea {
 .grid {
   display: grid;
   gap: 1.25rem;
-  grid-template-columns: minmax(0, 1.35fr) minmax(380px, 0.85fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tab-bar {
+  display: inline-flex;
+  background: rgba(11, 16, 32, 0.7);
+  border: 1px solid rgba(116, 134, 203, 0.18);
+  border-radius: 999px;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+  padding: 0.35rem;
+}
+
+.tab-button {
+  align-items: center;
+  background: transparent;
+  border-radius: 999px;
+  color: #cbd5ff;
+  display: inline-flex;
+  flex-direction: column;
+  font-weight: 700;
+  gap: 0.1rem;
+  padding: 0.55rem 1.2rem;
+}
+
+.tab-button:hover {
+  background: rgba(124, 92, 255, 0.12);
+}
+
+.tab-button.active {
+  background: linear-gradient(145deg, #7c5cff, #4936a8);
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(124, 92, 255, 0.35);
+}
+
+.tab-eyebrow {
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  opacity: 0.75;
+  text-transform: uppercase;
+}
+
+.tab-label {
+  font-size: 1rem;
+}
+
+.dashboard-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.chart-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.chart-card {
+  background: rgba(13, 18, 34, 0.85);
+  border: 1px solid rgba(116, 134, 203, 0.18);
+  border-radius: 20px;
+  padding: 1rem 1.1rem;
+}
+
+.chart-card header {
+  margin-bottom: 0.6rem;
+}
+
+.chart-card .eyebrow {
+  margin-bottom: 0.2rem;
+}
+
+.chart-card h3 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.chart-card-wide {
+  grid-column: 1 / -1;
+}
+
+.donut-wrap {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.4rem 0;
+}
+
+.donut {
+  max-width: 220px;
+  width: 100%;
+}
+
+.donut-total {
+  fill: #e8ecff;
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.donut-label {
+  fill: #9aa6c4;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.donut-legend {
+  display: grid;
+  gap: 0.3rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.donut-legend li {
+  align-items: center;
+  display: flex;
+  font-size: 0.82rem;
+  gap: 0.4rem;
+  justify-content: space-between;
+  padding: 0.15rem 0.2rem;
+}
+
+.legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 0.6rem;
+  width: 0.6rem;
+}
+
+.legend-label {
+  color: #cbd5ff;
+  flex: 1;
+  letter-spacing: 0.06em;
+}
+
+.legend-count {
+  color: #e8ecff;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.bars {
+  width: 100%;
+}
+
+.bar-axis-label {
+  fill: #8d9abe;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-peak-label {
+  fill: #cbd5ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.heatmap {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+.heat-cell {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  justify-content: space-between;
+  min-height: 78px;
+  padding: 0.6rem 0.7rem;
+}
+
+.heat-count {
+  font-size: 1.4rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.heat-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  opacity: 0.85;
 }
 
 .panel {

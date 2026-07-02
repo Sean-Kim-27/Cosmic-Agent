@@ -7,6 +7,7 @@ import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -583,6 +584,62 @@ class SQLiteCGIMemoryStore:
                 (job_id,),
             ).fetchone()
         return None if row is None else self._parse_job_from_row(row)
+
+    def count_parse_jobs_by_status(self) -> dict[str, int]:
+        """Return CGI parse job counts grouped by status.
+
+        Always returns every base status key so the dashboard chart never sees a
+        missing slice even on a freshly initialized database.
+        """
+
+        base: dict[str, int] = {
+            "PENDING": 0,
+            "PROCESSING": 0,
+            "COMPLETED": 0,
+            "FAILED": 0,
+            "QUOTA_LOCKED": 0,
+        }
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM cgi_parse_jobs
+                GROUP BY status
+                """
+            ).fetchall()
+        for row in rows:
+            status = str(row["status"])
+            count = int(row["count"])
+            base[status] = count
+        return base
+
+    def hourly_parse_jobs_last_24h(self, *, now: str | None = None) -> list[int]:
+        """Return an ordered 24-element array of job creations per UTC hour bucket.
+
+        The 0th index corresponds to 23 hours ago and the 23rd index to the
+        current hour, so the dashboard can render the bars left-to-right.
+        """
+
+        bucket_anchor = now or _current_utc_iso_minute()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT created_at
+                FROM cgi_parse_jobs
+                """
+            ).fetchall()
+        buckets = [0 for _ in range(24)]
+        anchor = _parse_iso_minute(bucket_anchor)
+        if anchor is None:
+            return buckets
+        for row in rows:
+            stamp = _parse_iso_minute(str(row["created_at"]))
+            if stamp is None:
+                continue
+            delta_hours = int((anchor - stamp) // 3600)
+            if 0 <= delta_hours < 24:
+                buckets[23 - delta_hours] += 1
+        return buckets
 
     def list_parse_jobs(
         self,
@@ -1224,3 +1281,36 @@ def _validate_job_statuses(statuses: tuple[CGIParseJobStatus, ...]) -> None:
     for status in statuses:
         if status not in _VALID_JOB_STATUSES:
             raise ValueError(f"Unsupported CGI parse job status: {status}")
+
+
+def _current_utc_iso_minute() -> str:
+    """Return the current UTC time truncated to the minute in ISO 8601."""
+
+    now = datetime.now(tz=UTC).replace(second=0, microsecond=0)
+    return now.strftime("%Y-%m-%dT%H:%M:00Z")
+
+
+def _parse_iso_minute(value: str) -> int | None:
+    """Parse an SQLite CURRENT_TIMESTAMP or ISO string into a UTC epoch minute.
+
+    Returns ``None`` when the string cannot be parsed so callers can skip the
+    row without crashing the whole aggregate.
+    """
+
+    if not value:
+        return None
+    candidate = value.strip()
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(candidate)
+    except ValueError:
+        try:
+            moment = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    else:
+        moment = moment.astimezone(UTC)
+    return int(moment.timestamp() // 60) * 60
